@@ -23,7 +23,8 @@ namespace MantisLODEditor.ndmf
                 {
                     ndmfMantis.Apply();
                 }
-            });
+            })
+            .PreviewingWith(new NDMFMantisLODPreview());
         }
     }
 }

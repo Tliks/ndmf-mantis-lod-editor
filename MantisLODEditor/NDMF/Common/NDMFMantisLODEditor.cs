@@ -1,14 +1,16 @@
 ﻿using System;
 using System.Collections.Generic;
-using nadena.dev.modular_avatar.core;
 using UnityEngine;
 using VRC.SDKBase;
-using Object = UnityEngine.Object;
 
 namespace MantisLODEditor.ndmf
 {
+    [DisallowMultipleComponent]
     public class NDMFMantisLODEditor : MonoBehaviour, IEditorOnly
     {
+        [HideInInspector]
+        public (int, int) Triangles = (0, 0);
+
         [SerializeField]
         private bool protect_boundary = true;
         
@@ -40,19 +42,32 @@ namespace MantisLODEditor.ndmf
         /// メッシュをまとめて投げてMantisLODEditorにデシメートしてもらう
         /// Through meshes and make MantisLODEditor decimate them
         /// </summary>
-        /// <param name="_meshes">MeshComponents and meshes</param>
+        /// <param name="_meshes">Renderers and meshes</param>
         /// <returns>triangles</returns>
-        public (int, int) Apply(Dictionary<Component, Mesh> _meshes = null)
+        public (int, int) Apply(Dictionary<Renderer, Mesh> _meshes = null)
         {
-            var meshes = _meshes ?? GetMesh();
+            var meshes = _meshes ?? GetMeshes();
             if (meshes == null)
             {
                 Debug.LogError("No mesh found!");
                 return default;
             }
 
+            var (originalTriangles, modifiedTriangles) = SimplifyMeshes(meshes, out var updatedMeshes);
+            foreach (var updatedMesh in updatedMeshes)
+            {
+                AssignMesh(updatedMesh.Key, updatedMesh.Value);
+            }
+
+            return (originalTriangles, modifiedTriangles);
+        }
+
+        public (int, int) SimplifyMeshes(Dictionary<Renderer, Mesh> meshes, out Dictionary<Renderer, Mesh> updatedMeshes)
+        {
             var originalTriangles = 0;
             var modifiedTriangles = 0; 
+
+            updatedMeshes = new Dictionary<Renderer, Mesh>();
             foreach (var meshPair in meshes)
             {
                 var mantisMeshArray = new[] { new Mantis_Mesh { mesh = Instantiate(meshPair.Value) } };
@@ -68,53 +83,55 @@ namespace MantisLODEditor.ndmf
                     mesh.colors32 = null;
                 }
 
-                switch (meshPair.Key)
-                {
-                    case MeshFilter meshFilter:
-                        meshFilter.sharedMesh = mesh;
-                        break;
-                    case SkinnedMeshRenderer skinnedMeshRenderer:
-                        skinnedMeshRenderer.sharedMesh = mesh;
-                        break;
-                    default:
-                        Debug.LogError("Unknown mesh type!");
-                        break;
-                }
+                updatedMeshes[meshPair.Key] = mesh;
             }
-
             return (originalTriangles, modifiedTriangles);
         }
 
-        public Dictionary<Component, Mesh> GetMesh()
+        public static void AssignMesh(Renderer renderer, Mesh mesh)
         {
-            var staticMeshes = gameObject.GetComponentsInChildren<MeshFilter>();
-            var skinnedMeshes = gameObject.GetComponentsInChildren<SkinnedMeshRenderer>();
-            var meshes = new Dictionary<Component, Mesh>();
-            
-            if (staticMeshes.Length <= 0 && skinnedMeshes.Length <= 0)
+            switch (renderer)
             {
-                return null;
+                case MeshRenderer meshrenderer:
+                    var meshfilter = meshrenderer.GetComponent<MeshFilter>();
+                    if (meshfilter == null) return;
+                    meshfilter.sharedMesh = mesh;
+                    break;
+                case SkinnedMeshRenderer skinnedMeshRenderer:
+                    skinnedMeshRenderer.sharedMesh = mesh;
+                    break;
             }
+        }
 
-            foreach (var meshFilter in staticMeshes)
+        public static Mesh GetMesh(Renderer renderer)
+        {
+            switch (renderer)
             {
-                if (meshFilter.sharedMesh == null)
+                case MeshRenderer meshrenderer:
+                    var meshfilter = meshrenderer.GetComponent<MeshFilter>();
+                    return meshfilter?.sharedMesh;
+                case SkinnedMeshRenderer skinnedMeshRenderer:
+                    return skinnedMeshRenderer.sharedMesh;
+                default:
+                    return null;
+            }
+        }
+
+        public Dictionary<Renderer, Mesh> GetMeshes()
+        {
+            var meshes = new Dictionary<Renderer, Mesh>();
+            var renderers = gameObject.GetComponentsInChildren<Renderer>(true);
+
+            foreach (var renderer in renderers)
+            {
+                var mesh = GetMesh(renderer);
+                if (mesh != null)
                 {
-                    continue;
+                    meshes.Add(renderer, mesh);
                 }
-                meshes.Add(meshFilter, meshFilter.sharedMesh);
             }
 
-            foreach (var skinnedMesh in skinnedMeshes)
-            {
-                if (skinnedMesh.sharedMesh == null)
-                {
-                    continue;
-                }
-                meshes.Add(skinnedMesh, skinnedMesh.sharedMesh);
-            }
-
-            return meshes;
+            return meshes.Count > 0 ? meshes : null;
         }
     }
 }

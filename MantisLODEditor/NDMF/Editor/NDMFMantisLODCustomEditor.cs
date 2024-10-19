@@ -1,21 +1,15 @@
 ﻿using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
-
-#if !UNITY_2020_1_OR_NEWER
-using AnimationModeDriver = UnityEngine.Object;
-#endif
+using nadena.dev.ndmf.preview;
 
 namespace MantisLODEditor.ndmf
 {
     [CustomEditor(typeof(NDMFMantisLODEditor))]
     public class NDMFMantisLODCustomEditor : Editor
     {
-        private bool m_isPreview;
-        private bool m_applied;
-        private Dictionary<Component, Mesh> m_originalMeshes;
-        private (int, int) m_triangles;
-        private AnimationModeDriver m_animationModeDriver;
+        private NDMFMantisLODEditor m_target;
+        private TogglablePreviewNode m_toggleNode;
 
         //Mantis Editor Parameters
         private SerializedProperty m_protectBoundary;
@@ -30,14 +24,6 @@ namespace MantisLODEditor.ndmf
         //NDMF Mantis Parameters
         private SerializedProperty m_removeVertexColor;
 
-        private AnimationModeDriver AnimationModeDriver => m_animationModeDriver
-            ? m_animationModeDriver
-#if UNITY_2020_1_OR_NEWER
-            : m_animationModeDriver = CreateInstance<AnimationModeDriver>();
-#else
-            : m_animationModeDriver = ScriptableObject.CreateInstance(typeof(AnimationMode).Assembly.GetType("UnityEditor.AnimationModeDriver"));
-#endif
-
         private void OnEnable()
         {
             m_protectBoundary = serializedObject.FindProperty("protect_boundary");
@@ -49,6 +35,9 @@ namespace MantisLODEditor.ndmf
             m_detailBoost = serializedObject.FindProperty("detail_boost");
             m_quality = serializedObject.FindProperty("quality");
             m_removeVertexColor = serializedObject.FindProperty("remove_vertex_color");
+            
+            m_target = target as NDMFMantisLODEditor;
+            m_toggleNode = NDMFMantisLODPreview.ToggleNode;
         }
         
         public override void OnInspectorGUI()
@@ -63,48 +52,16 @@ namespace MantisLODEditor.ndmf
             EditorGUILayout.PropertyField(m_detailBoost, new GUIContent("Detail Boost"));
             EditorGUILayout.PropertyField(m_removeVertexColor, new GUIContent("Remove Vertex Color After Optimize"));
             EditorGUILayout.PropertyField(m_quality, new GUIContent("Quality"));
-            if (serializedObject.hasModifiedProperties)
-            {
-                m_applied = false;
-            }
             serializedObject.ApplyModifiedProperties();
             
-            var mantis = target as NDMFMantisLODEditor;
-            m_originalMeshes = m_originalMeshes ?? mantis.GetMesh();
-
-
-            if (!m_isPreview && AnimationMode.InAnimationMode())
+            if (GUILayout.Button(m_toggleNode.IsEnabled.Value ? "Stop Preview" : "Preview"))
             {
-                using (new EditorGUI.DisabledGroupScope(true))
-                {
-                    GUILayout.Button("Preview (Maybe other preview is working)");
-                }
-            }
-            else
-            {
-                if (GUILayout.Button(m_isPreview ? "Stop Preview" : "Preview"))
-                {
-                    m_isPreview = !m_isPreview;
-                    m_applied = false;
-                    if (m_isPreview)
-                    {
-                        ReadyPreview();
-                    }
-                    else
-                    {
-                        StopPreview();
-                    }
-                }
+                m_toggleNode.IsEnabled.Value = !m_toggleNode.IsEnabled.Value;
             }
 
-            if (m_isPreview)
+            if (m_toggleNode.IsEnabled.Value)
             {
-                if (mantis != null && !m_applied)
-                {
-                    m_triangles = mantis.Apply(m_originalMeshes);
-                    m_applied = true;
-                }
-                EditorGUILayout.LabelField($"Triangles", $"{m_triangles.Item2}/{m_triangles.Item1}");
+                EditorGUILayout.LabelField($"Triangles", $"{m_target.Triangles.Item2}/{m_target.Triangles.Item1}");
             }
             else
             {
@@ -112,48 +69,5 @@ namespace MantisLODEditor.ndmf
             }
         }
 
-        private void ReadyPreview()
-        {
-#if UNITY_2020_1_OR_NEWER
-            AnimationMode.StartAnimationMode(AnimationModeDriver);
-#else
-            AnimationMode.StartAnimationMode();
-#endif
-            try
-            {
-                AnimationMode.BeginSampling();
-
-                foreach (var originalMeshPair in m_originalMeshes)
-                {
-                    AnimationMode.AddPropertyModification(
-                        EditorCurveBinding.PPtrCurve("", typeof(SkinnedMeshRenderer), "m_Mesh"),
-                        new PropertyModification
-                        {
-                            target = originalMeshPair.Key,
-                            propertyPath = "m_Mesh",
-                            objectReference = originalMeshPair.Value,
-                        }, 
-                        true);
-                }
-            }
-            finally
-            {
-                AnimationMode.EndSampling();   
-            }
-        }
-        
-        private void StopPreview()
-        {
-#if UNITY_2020_1_OR_NEWER
-            AnimationMode.StopAnimationMode(AnimationModeDriver);
-#else
-            AnimationMode.StopAnimationMode();
-#endif
-        }
-
-        private void OnDisable()
-        {
-            StopPreview();
-        }
     }
 }
